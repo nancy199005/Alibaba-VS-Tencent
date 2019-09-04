@@ -1,0 +1,464 @@
+
+function isNumber (path) {
+  return !isNaN(Number(path));
+}
+
+function isObj (key) {
+  return typeof key === 'object';
+}
+
+/**
+ * 判断obj中是否有key这个属性
+ * @param obj {object}
+ * @param key {string}
+ */
+function objHasKey(obj, key) {
+  return obj.hasOwnProperty(key);
+}
+
+/**
+ * @param {{
+  *  control: Boolean,
+  *  key: string,
+  *  value: string,
+  *  data?: obj,
+  *  elseValue?: string
+  * }} option
+  * 
+  * 参数说明：
+  * control 判断条件
+  * data 最终返回的对象
+  * key 添加到data中的属性
+  * value 要添加的值
+  * elseValue 如果control不成立，添加到data的值 传入此参数则添加，不传则不会添加
+  */
+function setProperty(option) {
+  const { data = {}, key, value, control, elseValue } = option;
+  if (control) {
+    data[key] = value;
+  } else if (elseValue) {
+    data[key] = elseValue;
+  }
+  return data;
+}
+
+function externalLink (hrefValue) {
+  const data = {};
+  const externalLinkList = [
+    { pathKey: '/', mediaSourceValue: 'page_home' },
+    { pathKey: 'p', mediaSourceValue: 'article' },
+    { pathKey: 'newsflashes', mediaSourceValue: 'newsflash', subPathNotNumMediaSourceValue: 'page_newsflashes' },
+    { pathKey: 'topics', mediaSourceValue: 'topics' },
+  ];
+  const pathInfo = new PathInfo(window.location.pathname);
+  // 记录外链url
+  data.media_content_id = hrefValue;
+  // 详情页中（当前地址包含ID），含有外链，发送source_id
+  Object.assign(data, setProperty({
+    control: isNumber(pathInfo.sub),
+    key: 'source_id',
+    value: pathInfo.sub,
+  }));
+  // 地方站 外链记录media_event_value
+  if (pathInfo.root === 'local') {
+    data.media_event_value = 'local_' + pathInfo.sub;
+  }
+  return Object.assign(data, genMediaSource(externalLinkList, isNumber(pathInfo.sub)));
+}
+
+function internalLink (hrefValue, className) {
+  const pageInfo = new PageInfo(hrefValue);
+  const data = {};
+  /* 聚合页跳转id */
+  Object.assign(data, setProperty({
+    control: pageInfo.currentPath.sub && isNumber(pageInfo.currentPath.sub) && pageInfo.destPath.sub && isNumber(pageInfo.destPath.sub),
+    key: 'source_id',
+    value: pageInfo.currentPath.sub,
+  }));
+  /* 搜索结果、资讯、地方 */
+  Object.assign(data, genMediaEventValue(hrefValue));
+  // 文章详情含有跳转链接
+  Object.assign(data, setProperty({
+    control: pageInfo.currentPath.root === 'p' && isNumber(pageInfo.currentPath.sub) && isNumber(pageInfo.destPath.sub),
+    key: 'media_source',
+    value: 'article',
+  }));
+  /* 不同页面，进入详情页 */
+  Object.assign(data, intoDetailPage(pageInfo.destPath.sub));
+  /* 添加media_conten_type 针对相应页面添加属性 */
+  Object.assign(data, genContentTypeAndId(hrefValue, className));
+  return data;
+}
+
+function genMediaEventValue (hrefValue) {
+  const data = {};
+  const key = 'media_event_value';
+  const pageInfo = new PageInfo(hrefValue);
+  const genMediaEventValueList = [
+    { pathKey: 'search', subPathList: [
+      {key: 'articles', value: 'search_articles'},
+      {key: 'newsflashes', value: 'search_flashnews'},
+      {key: 'video', value: 'search_videos'},
+      {key: 'monographic', value: 'search_topics'},
+      {key: 'user', value: 'search_writer'},
+    ]},
+    { pathKey: 'information', subPathList: [
+      'web_news', 'contact', 'enterpriseservice', 'happy_life', 'travel',
+      'real_estate', 'web_recommend', 'technology', {key: 'zhichang', value: 'web_zhichang'}, 'innovate',
+    ]},
+    { pathKey: 'local' }
+  ];
+  for (const pathItem of genMediaEventValueList) {
+    if (pageInfo.currentPath.root === pathItem.pathKey) {
+      if (pageInfo.currentPath.root === 'local') {
+        // 城市
+        data.media_event_value = 'local_' + pageInfo.currentPath.sub;
+      } else {
+        for (const subPathItem of pathItem.subPathList) {
+          const value = isObj(subPathItem) ? subPathItem.value : subPathItem;
+          const subPathKey = isObj(subPathItem) ? subPathItem.key : subPathItem;
+          if (pageInfo.currentPath.sub === subPathKey) {
+            Object.assign(data, setProperty({
+              control: isNumber(pageInfo.destPath.sub),
+              key,
+              value,
+            }));
+          }
+        }
+      }
+    }
+  }
+  return data;
+}
+
+function intoDetailPage (subHref) {
+  // 不同页面进入到详情页，添加media_source
+  const pathInfo = new PathInfo(window.location.pathname);
+  const intoDetailPageList = [
+    { pathKey: '/', mediaSourceValue: 'page_home' },
+    { pathKey: '/video', mediaSourceValue: 'page_video' },
+    { pathKey: '/topics', mediaSourceValue: 'page_topics' },
+    { pathKey: 'newsflashes', control: isNumber(pathInfo.sub), mediaSourceValue: 'newsflash', subPathNotNumMediaSourceValue: 'page_newsflashes' },
+    { pathKey: 'information', mediaSourceValue: 'page_information' },
+    { pathKey: 'search', mediaSourceValue: 'page_search' },
+    { pathKey: 'Calendar', mediaSourceValue: 'calendar' },
+    { pathKey: 'user', mediaSourceValue: 'user' },
+    { pathKey: 'motif', mediaSourceValue: 'motif' },
+    { pathKey: 'topics', mediaSourceValue: 'topics' },
+    { pathKey: 'video', mediaSourceValue: 'video' },
+  ];
+  return genMediaSource(intoDetailPageList, isNumber(subHref));
+}
+
+function genMediaSource (pathList, control) {
+  const pathInfo = new PathInfo(window.location.pathname);
+  const key = 'media_source';
+  const data = {};
+  for (const pathItem of pathList) {
+    if (pathInfo.path === pathItem.pathKey) {
+      data.media_source = pathItem.mediaSourceValue;
+    } else if (pathInfo.root === pathItem.pathKey && pathInfo.sub) {
+      Object.assign(data, setProperty({
+        control: objHasKey(pathItem, 'control') ? pathItem.control : control,
+        key,
+        value: pathItem.mediaSourceValue,
+        elseValue: pathItem.subPathNotNumMediaSourceValue || null,
+      }));
+    }
+  }
+  return data;
+}
+
+function genContentTypeAndId (hrefValue, className) {
+  // 设置media_content_type和media_content_id
+  const pageInfo = new PageInfo(hrefValue);
+  const genContentTypeAndIdList = [
+    {
+      key: 'p',
+      setData: {
+        media_content_type: 'article',
+        media_content_id: pageInfo.destPath.sub,
+      }
+    },
+    {
+      key: 'newsflashes',
+      setData: {
+        media_content_type: 'flashnews',
+        media_content_id: pageInfo.destPath.sub,
+      }
+    },
+    {
+      key: 'video',
+      setData: {
+        media_content_type: 'video',
+        media_content_id: pageInfo.destPath.sub,
+      }
+    },
+    {
+      key: 'v-video',
+      setData: {
+        media_content_type: 'video_portrait',
+        media_content_id: pageInfo.destPath.sub,
+      }
+    },
+    {
+      key: 'topics',
+      setData: {
+        media_content_type: 'topic',
+        media_content_id: pageInfo.destPath.sub,
+      }
+    },
+    {
+      key: 'motif',
+      setData: {
+        media_content_type: (() => {
+          // TODO 这里声明了一个自执行函数，判断是否为商业主题后，给media_conten_type不同的值，可否优化?
+          const isMotifList = pageInfo.currentPath.root === 'motif-catalog' && pageInfo.currentPath.sub === 'recomend';
+          const isHomeEntry = className.includes('businessMotifHome-main-item-top-a');
+          const isBusinessMotif = isMotifList || isHomeEntry;
+          return isBusinessMotif ? 'business_motif' : 'motif';
+        })(),
+        media_content_id: pageInfo.destPath.sub,
+      }
+    },
+    {
+      key: 'user',
+      setData: {
+        media_content_type: 'user',
+        media_content_id: pageInfo.destPath.sub,
+      }
+    },
+  ];
+  let data = {};
+  if (!isNumber(pageInfo.destPath.sub)) return data;
+  for (const hrefItem of genContentTypeAndIdList) {
+    if (pageInfo.destPath.root === hrefItem.key) {
+      data = hrefItem.setData;
+    }
+  }
+  return data;
+}
+
+function genPropertyAccordingToAttribute (elementTarget) {
+  /**
+   * 方法依赖a标签上设置的属性，根据a标签的属性添加
+   */
+  const operation_list = elementTarget.getAttribute('sensors_operation_list');
+  const index_num = elementTarget.getAttribute('sensors_index_num');
+  const operate_type = elementTarget.getAttribute('sensors_operate_type');
+  const position_id = elementTarget.getAttribute('sensors_position_id');
+  const plan_id = elementTarget.getAttribute('sensors_media_content_id');
+  const genPropertyAccordingToAttributeList = [
+    {
+      control: operation_list === 'page_flow' && window.location.pathname === '/',
+      key: 'operation_list',
+      value: 'latest_articles',
+      elseValue: 'page_flow'
+    },
+    {
+      control: operation_list === 'banner',
+      key: 'operation_list',
+      value: 'banner'
+    },
+    {
+      control: operation_list === 'banner_right',
+      key: 'operation_list',
+      value: 'banner_right'
+    },
+    {
+      control: operation_list === 'author_latest_article',
+      key: 'operation_list',
+      value: 'author_latest_article'
+    },
+    {
+      control: operation_list === 'specialtopic_recommend',
+      key: 'operation_list',
+      value: 'specialtopic_recommend'
+    },
+    {
+      control: operation_list === 'video_recommend',
+      key: 'operation_list',
+      value: 'video_recommend'
+    },
+    {
+      control: operation_list === 'dailyword',
+      key: 'operation_list',
+      value: 'dailyword'
+    },
+    {
+      control: operation_list === 'latest_newsflash',
+      key: 'operation_list',
+      value: 'latest_newsflash'
+    },
+    {
+      control: operation_list === 'business_motif',
+      key: 'operation_list',
+      value: 'business_motif'
+    },
+    {
+      control: operation_list === 'hotlist',
+      key: 'operation_list',
+      value: 'hotlist'
+    },
+    {
+      control: operation_list === 'latest_videos',
+      key: 'operation_list',
+      value: 'latest_videos'
+    },
+    {
+      control: operation_list === 'recommend_motif',
+      key: 'operation_list',
+      value: 'recommend_motif'
+    },
+    {
+      control: operation_list === 'hot_author',
+      key: 'operation_list',
+      value: 'hot_author'
+    },
+    {
+      control: operation_list === 'next_card',
+      key: 'operation_list',
+      value: 'next_card'
+    },
+    {
+      control: index_num,
+      key: 'media_index_number',
+      value: index_num
+    },
+    {
+      control: operate_type,
+      key: 'operate_type',
+      value: operate_type
+    },
+    {
+      control: position_id,
+      key: 'position_id',
+      value: position_id
+    },
+    {
+      control: plan_id,
+      key: 'media_content_id',
+      value: plan_id
+    },
+    {
+      control: operate_type || position_id,
+      key: 'media_content_type',
+      value: 'ad'
+    },
+    {
+      control: position_id === '827' || operation_list === 'home_top',
+      key: 'operation_list',
+      value: 'home_top'
+    },
+    {
+      control: position_id === '817',
+      key: 'operation_list',
+      value: 'article_bottom'
+    },
+    {
+      control: position_id === '835',
+      key: 'operation_list',
+      value: 'comment_bottom'
+    },
+  ]
+  const data = {};
+  for (const infoItem of genPropertyAccordingToAttributeList) {
+    Object.assign(data, setProperty(infoItem));
+  }
+  return data;
+}
+
+function manualMain ( elementTarget ) {
+  // 只采集a标签的跳转
+  if (elementTarget.tagName.toLowerCase() !== 'a') throw Error('目前只收集点击a标签所跳转的信息');
+  const data = { platform: 'web' };
+  const attributes = elementTarget.attributes;
+  const hrefObj = attributes.href || {};
+  const className = getClass(attributes);
+  const hrefValue = hrefObj.value || "";
+  if (/(http|ftp|https):\/\//.test(hrefValue) && !hrefValue.includes('36kr.com')) {
+    Object.assign(data, externalLink(hrefValue));
+  } else {
+    let internalLinkHrefValue = hrefValue;
+    if (hrefValue.includes('36kr.com')) internalLinkHrefValue = hrefValue.split('36kr.com')[1];
+    Object.assign(data, internalLink(internalLinkHrefValue, className));
+  }
+  // 通过标签属性，添加相关信息
+  Object.assign(data, genPropertyAccordingToAttribute(elementTarget));
+  return data;
+}
+
+function getClass(attributes) {
+  const classObj = attributes.class || {};
+  return classObj.value || "";
+}
+
+class PathInfo {
+  constructor (path) {
+    this.path = path
+    const pathArr = path.split('/').filter(x => x !== "");
+    this.root = pathArr[0];
+    this.sub = pathArr[1];
+  }
+}
+class PageInfo {
+  constructor (href) {
+    this.destPath = {
+      ...new PathInfo(href),
+      ...new SourcePath(href)
+    }
+    this.currentPath = {
+      ...new PathInfo(window.location.pathname),
+      ...new SourcePath(window.location.pathname)
+    }
+  }
+}
+
+class SourcePath {
+  constructor (href) {
+    this.group = SourcePath.groupFn(href);
+  }
+
+  static groupFn = href => {
+    const pathInfo = new PathInfo(href);
+    if (pathInfo.sub && isNumber(pathInfo.sub)) {
+      return 'content';
+    } else {
+      return 'default';
+    }
+  }
+}
+
+function getCaseKey(data) {
+  if(
+    data.hasOwnProperty('operate_type') ||
+    data.hasOwnProperty('position_id')
+  ) {
+    return 'MediaWebAD';
+  } else {
+    return 'MediaWebRead';
+  }
+}
+
+function coverTagAClickEvent() {
+  document.querySelectorAll('a').forEach(item => {
+    item.addEventListener('click', function(e){
+      const elementTarget = item;
+      const targetValue = elementTarget.getAttribute('target');
+      const targetHref = elementTarget.getAttribute('href');
+      const url = this.href;
+      const data = manualMain(elementTarget);
+      if (!targetHref) return;
+      if (!targetValue) e.preventDefault();
+      window.sa.track(getCaseKey(data), data, function(){
+        if(!targetValue) location.href = url;
+      });
+    });
+  });
+}
+// 手动埋点内容
+window.onload = function() {
+  setTimeout(() => {
+    coverTagAClickEvent();
+  },1200);
+}
